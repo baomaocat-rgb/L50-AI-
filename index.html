@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 创作平台 - 现代化 UI 版 (剧本设定折叠版)</title>
+    <title>AI 创作平台 - 现代化 UI 版 (TTS 播报版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -391,11 +391,16 @@
                         <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                             <div class="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                                 <div><h2 class="text-[15px] font-bold text-slate-800">成稿预览</h2><p class="text-xs text-slate-400 mt-1">仅展示已确认或已生成的台本内容</p></div>
-                                <button onclick="alert('Excel 导出成功')" class="btn-base btn-dark px-4 h-8 gap-2 text-xs"><i data-lucide="download" class="w-3.5 h-3.5"></i> 导出 Excel</button>
+                                <div class="flex items-center gap-3">
+                                    <button id="btn-stop-tts" onclick="stopTTS()" class="hidden btn-base btn-outline px-3 h-8 gap-1.5 text-xs text-red-500 border-red-200 hover:bg-red-50"><i data-lucide="square" class="w-3.5 h-3.5"></i> 停止播放</button>
+                                    <button id="btn-play-all-tts" onclick="playAllTTS()" class="hidden btn-base btn-outline px-3 h-8 gap-1.5 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50"><i data-lucide="play" class="w-3.5 h-3.5"></i> 播放全部台本</button>
+                                    <button id="btn-export-excel" onclick="alert('Excel 导出成功')" class="btn-base btn-dark px-4 h-8 gap-2 text-xs"><i data-lucide="download" class="w-3.5 h-3.5"></i> 导出 Excel</button>
+                                </div>
                             </div>
                             <div class="overflow-x-auto p-6">
                                 <table class="table-view-container rounded-lg overflow-hidden" id="final-table">
-                                    <thead><tr><th class="w-48">台本ID</th><th class="w-24">角色</th><th>完整台本内容</th><th class="w-64">Prompt设定</th></tr></thead>
+                                    <thead id="final-table-thead">
+                                        </thead>
                                     <tbody id="final-table-body"></tbody>
                                 </table>
                             </div>
@@ -443,7 +448,8 @@
     
     <script>
         lucide.createIcons();
-        window.initialPrompts = {}; // NEW: 存储初始设定的Prompt以便恢复
+        window.initialPrompts = {}; // 存储初始设定的Prompt以便恢复
+        window.currentFinalDialogues = []; // TTS 全局台本数组
 
         let blockCount = 1; let outlineBlockCount = 0; let currentMode = 'normal';
         let selectedRange = null;
@@ -513,13 +519,12 @@
             document.getElementById('sidebar-list').innerHTML = '';
             blockCount = 1; outlineBlockCount = 0;
             const headerActions = document.getElementById('header-actions');
-            const viewToggle = document.getElementById('view-mode-group');
             const globalAiBtn = document.getElementById('btn-global-ai'); 
+            
             if(val === 'long_script') {
                 currentMode = 'long_script';
                 document.getElementById('flow-canvas').classList.add('hidden');
                 document.getElementById('pipeline-canvas').classList.remove('hidden');
-                viewToggle.classList.add('hidden'); 
                 document.getElementById('outline-list-container').innerHTML = '';
                 addOutlineBlock(); 
                 headerActions.innerHTML = ''; 
@@ -528,7 +533,6 @@
                 currentMode = 'normal';
                 document.getElementById('flow-canvas').classList.remove('hidden');
                 document.getElementById('pipeline-canvas').classList.add('hidden');
-                viewToggle.classList.remove('hidden'); 
                 document.getElementById('sidebar-title').innerHTML = `<i data-lucide="book-open" class="w-4 h-4 text-slate-400"></i> 台本列表`;
                 if(globalAiBtn) globalAiBtn.style.display = 'flex';
                 headerActions.innerHTML = `
@@ -614,7 +618,7 @@
             return `在此输入自定义Prompt...`;
         }
 
-        // --- NEW: 恢复原 Prompt 设定逻辑 ---
+        // --- 恢复原 Prompt 设定逻辑 ---
         function checkPromptEmpty(id) {
             const el = document.getElementById(`prompt-${id}`);
             const btn = document.getElementById(`restore-${id}`);
@@ -648,7 +652,7 @@
                 currentContent = manualBox.innerText;
             }
 
-            let rounds = 4; // 默认 4 句
+            let rounds = 4; 
             if(promptArea) { 
                 const match = promptArea.innerText.match(/(\d+)句/); 
                 if(match) rounds = parseInt(match[1]); 
@@ -657,7 +661,6 @@
             
             btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin text-white"></i>`; btn.disabled = true;
             
-            // 骨架屏 HTML
             const skeletonHTML = `
             <div class="border border-emerald-200 rounded-lg p-5 bg-white mt-3">
                 <div class="text-[13px] font-bold text-emerald-600 mb-4 flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></div> AI 正在为您生成台本方案...</div>
@@ -678,7 +681,6 @@
             setTimeout(() => {
                 btn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4 text-emerald-300"></i>`; btn.disabled = false;
                 const uid = Date.now();
-                // 方案网格 HTML (Shadcn UI Card)
                 const variantsHtml = `
                 <div class="border border-emerald-400 rounded-lg p-5 bg-white mt-3 shadow-[0_0_0_4px_rgba(16,185,129,0.05)] fade-in" id="variants-${uid}">
                     <div class="text-[13px] font-bold text-slate-500 mb-4 ml-1">AI 生成台本方案：</div>
@@ -730,13 +732,14 @@
             document.querySelectorAll(`#${activeContainer} button[onclick^="generateBlockAI"]`).forEach((btn,i) => setTimeout(()=>btn.click(), i*300));
         }
         
-        // --- 视图模式与最终成稿表 ---
+        // --- 视图模式与最终成稿表 (更新了隐藏 Prompt设定栏 和 去除导出按钮 逻辑) ---
         function switchViewMode(mode) {
              const vE = document.getElementById('view-editor'), vF = document.getElementById('view-final');
              const templateSelector = document.getElementById('global-template-selector');
              const addParagraphBtn = document.querySelector('#header-actions button[onclick^="addNewBlock"]');
              
              if(mode==='editor'){ 
+                 stopTTS(); // 切换模式时自动停止语音
                  vE.classList.remove('hidden'); vF.classList.add('hidden'); 
                  document.getElementById('btn-mode-editor').className="px-4 py-1.5 rounded-md transition-all duration-200 bg-white shadow-sm text-slate-900"; 
                  document.getElementById('btn-mode-final').className="px-4 py-1.5 rounded-md transition-all duration-200 hover:text-slate-700"; 
@@ -751,12 +754,36 @@
                  
                  templateSelector.disabled = true; templateSelector.style.opacity = '0.5'; templateSelector.style.pointerEvents = 'none';
                  if(addParagraphBtn) { addParagraphBtn.disabled = true; addParagraphBtn.style.opacity = '0.5'; addParagraphBtn.style.pointerEvents = 'none'; }
+                 
+                 // 控制成稿模式右上角的按钮显示逻辑
+                 const playAllBtn = document.getElementById('btn-play-all-tts');
+                 const exportBtn = document.getElementById('btn-export-excel');
+                 
+                 if (currentMode === 'long_script') {
+                     if (playAllBtn) playAllBtn.classList.remove('hidden');
+                     if (exportBtn) exportBtn.classList.add('hidden');
+                 } else {
+                     if (playAllBtn) playAllBtn.classList.add('hidden');
+                     if (exportBtn) exportBtn.classList.remove('hidden');
+                 }
              }
         }
         
         function generateFinalTable() {
             const b = document.getElementById('final-table-body'); b.innerHTML = '';
+            const thead = document.getElementById('final-table-thead');
             const active = currentMode === 'long_script' ? 'long-script-container' : 'flow-canvas';
+            
+            // 如果是长剧本，隐藏 "Prompt设定" 表头
+            if (currentMode === 'long_script') {
+                thead.innerHTML = `<tr><th class="w-48">台本ID</th><th class="w-24">角色</th><th>完整台本内容</th></tr>`;
+            } else {
+                thead.innerHTML = `<tr><th class="w-48">台本ID</th><th class="w-24">角色</th><th>完整台本内容</th><th class="w-64">Prompt设定</th></tr>`;
+            }
+
+            window.currentFinalDialogues = [];
+            let globalIndex = 0;
+
             document.querySelectorAll(`#${active} [id$="-wrapper"]`).forEach(w => {
                 const title = w.querySelector('input').value;
                 const tags = Array.from(w.querySelectorAll('.prompt-tag')).map(t => `<span class="inline-block bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded text-[11px] font-medium mr-1 mb-1">${t.dataset.type || t.innerText.replace(/\\s*∨$/, '').trim()}</span>`).join('');
@@ -782,23 +809,135 @@
                             const parts = cleanLine.split(new RegExp(`${separator}(.+)`)); 
                             role = parts[0].trim(); text = parts[1] ? parts[1].trim() : ""; 
                         } else { role = "对白"; text = cleanLine; }
-                        dialogueRows.push({role, text});
+                        
+                        dialogueRows.push({role, text, index: globalIndex});
+                        window.currentFinalDialogues.push({role, text});
+                        globalIndex++;
                     });
+                    
                     if (dialogueRows.length > 0) {
                         dialogueRows.forEach((row, index) => {
                             const tr = document.createElement('tr');
+                            
+                            // 仅在长剧本模式下，并且存在实际对白文本时，给每行对话右侧增加播放按钮
+                            let textContentHtml = `<span class="flex-1 leading-relaxed">${row.text}</span>`;
+                            if (currentMode === 'long_script') {
+                                if (row.text.trim() !== '') {
+                                    const playBtn = `<button onclick="playSingleTTS(${row.index})" class="text-emerald-500 hover:text-emerald-700 transition-colors p-1.5 flex-shrink-0 bg-emerald-50 rounded-md hover:bg-emerald-100" title="播放此段"><i data-lucide="volume-2" class="w-4 h-4"></i></button>`;
+                                    textContentHtml = `<div class="flex items-center justify-between gap-4">${textContentHtml} ${playBtn}</div>`;
+                                } else {
+                                    textContentHtml = `<div class="flex items-center justify-between gap-4">${textContentHtml}</div>`;
+                                }
+                            }
+
                             if (index === 0) {
-                                tr.innerHTML = `<td class="text-xs font-bold text-slate-700 bg-slate-50" rowspan="${dialogueRows.length}" style="vertical-align: top;">${title}</td><td class="text-xs text-slate-500">${row.role}</td><td class="text-[13px] text-slate-800">${row.text}</td><td class="text-xs" rowspan="${dialogueRows.length}" style="vertical-align: top;">${tags || '<span class="text-slate-400">-</span>'}</td>`;
+                                if (currentMode === 'long_script') {
+                                    tr.innerHTML = `<td class="text-xs font-bold text-slate-700 bg-slate-50" rowspan="${dialogueRows.length}" style="vertical-align: top;">${title}</td><td class="text-xs text-slate-500" style="vertical-align: top;">${row.role}</td><td class="text-[13px] text-slate-800">${textContentHtml}</td>`;
+                                } else {
+                                    tr.innerHTML = `<td class="text-xs font-bold text-slate-700 bg-slate-50" rowspan="${dialogueRows.length}" style="vertical-align: top;">${title}</td><td class="text-xs text-slate-500" style="vertical-align: top;">${row.role}</td><td class="text-[13px] text-slate-800">${textContentHtml}</td><td class="text-xs" rowspan="${dialogueRows.length}" style="vertical-align: top;">${tags || '<span class="text-slate-400">-</span>'}</td>`;
+                                }
                             } else {
-                                tr.innerHTML = `<td class="text-xs text-slate-500">${row.role}</td><td class="text-[13px] text-slate-800">${row.text}</td>`;
+                                tr.innerHTML = `<td class="text-xs text-slate-500" style="vertical-align: top;">${row.role}</td><td class="text-[13px] text-slate-800">${textContentHtml}</td>`;
                             }
                             b.appendChild(tr);
                         });
                     }
                 }
             });
-            if(b.children.length === 0) b.innerHTML = '<tr><td colspan="4" class="text-center py-10 text-[13px] text-slate-400">暂无生成内容，请先在编辑模式下生成或输入台本。</td></tr>';
+            if(b.children.length === 0) b.innerHTML = `<tr><td colspan="${currentMode === 'long_script' ? 3 : 4}" class="text-center py-10 text-[13px] text-slate-400">暂无生成内容，请先在编辑模式下生成或输入台本。</td></tr>`;
+            lucide.createIcons();
         }
+
+        // ==================== TTS 播报核心逻辑 ====================
+        let ttsVoices = [];
+        window.speechSynthesis.onvoiceschanged = () => { ttsVoices = window.speechSynthesis.getVoices(); };
+
+        function getVoiceForRole(role) {
+            if (!ttsVoices.length) ttsVoices = window.speechSynthesis.getVoices();
+            let isMale = role.includes('男') || role.includes('B') || role.includes('2') || role.toLowerCase().includes('tim');
+            
+            let targetVoice = null;
+            if (isMale) {
+                targetVoice = ttsVoices.find(v => v.lang.includes('zh') && (v.name.includes('Yun') || v.name.includes('Male') || v.name.includes('男')));
+            } else {
+                targetVoice = ttsVoices.find(v => v.lang.includes('zh') && (v.name.includes('Xiao') || v.name.includes('Female') || v.name.includes('女') || v.name.includes('Tingting')));
+            }
+            if (!targetVoice) targetVoice = ttsVoices.find(v => v.lang.includes('zh'));
+            return targetVoice;
+        }
+
+        function createUtterance(role, text, onEndCallback) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            const voice = getVoiceForRole(role);
+            if (voice) utterance.voice = voice;
+            
+            if (!voice || (!voice.name.includes('Yun') && !voice.name.includes('Xiao') && !voice.name.includes('男') && !voice.name.includes('女'))) {
+                utterance.pitch = (role.includes('B') || role.includes('男') || role.toLowerCase().includes('tim')) ? 0.8 : 1.2;
+            }
+            utterance.rate = 1.1; 
+            if (onEndCallback) utterance.onend = onEndCallback;
+            utterance.onerror = () => { stopTTS(); };
+            return utterance;
+        }
+
+        function playSingleTTS(index) {
+            window.speechSynthesis.cancel();
+            document.getElementById('btn-stop-tts').classList.remove('hidden');
+            
+            const dialogue = window.currentFinalDialogues[index];
+            if(!dialogue || !dialogue.text || dialogue.text.trim() === '') {
+                document.getElementById('btn-stop-tts').classList.add('hidden');
+                return;
+            }
+            
+            const utterance = createUtterance(dialogue.role, dialogue.text, () => {
+                document.getElementById('btn-stop-tts').classList.add('hidden');
+            });
+            window.speechSynthesis.speak(utterance);
+        }
+
+        let isPlayingAll = false;
+        let playAllIndex = 0;
+
+        function playNextTTS() {
+            if (!isPlayingAll || playAllIndex >= window.currentFinalDialogues.length) {
+                stopTTS(); return;
+            }
+            const dialogue = window.currentFinalDialogues[playAllIndex];
+            
+            // 跳过空文本，防止 TTS 队列卡死
+            if (!dialogue || !dialogue.text || dialogue.text.trim() === '') {
+                playAllIndex++;
+                playNextTTS();
+                return;
+            }
+            
+            const utterance = createUtterance(dialogue.role, dialogue.text, () => {
+                playAllIndex++;
+                playNextTTS();
+            });
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function playAllTTS() {
+            if (!window.currentFinalDialogues || window.currentFinalDialogues.length === 0) {
+                alert("暂无台本可播放"); return;
+            }
+            window.speechSynthesis.cancel();
+            isPlayingAll = true;
+            playAllIndex = 0;
+            document.getElementById('btn-stop-tts').classList.remove('hidden');
+            playNextTTS();
+        }
+
+        function stopTTS() {
+            window.speechSynthesis.cancel();
+            isPlayingAll = false;
+            const stopBtn = document.getElementById('btn-stop-tts');
+            if (stopBtn) stopBtn.classList.add('hidden');
+        }
+        // ==================== TTS 逻辑结束 ====================
+
         
         // --- 侧边栏与长剧本流水线 ---
         function switchPipelineTab(tab) {
@@ -840,15 +979,15 @@
             l.appendChild(i); 
         }
         function updateSidebar(id, v) { const l=document.getElementById(`sidebar-link-${id}`); if(l)l.innerText=v; }
-        function deleteBlock(id) { if(confirm('确定删除该台本段落？')){document.getElementById(`${id}-wrapper`).remove();document.getElementById(`sidebar-link-${id}`).remove();} }
+        function deleteBlock(id) { if(confirm('确定删除该台本段落？')){document.getElementById(`${id}-wrapper`).remove();document.getElementById(`sidebar-link-${id}`).remove(); delete window.initialPrompts[id]; } }
         function highlightSidebar(id) { document.querySelectorAll('.sidebar-item').forEach(e=>e.classList.remove('bg-emerald-50','text-emerald-600','font-bold')); const t = document.getElementById(`sidebar-link-${id}`); if(t) { t.classList.add('bg-emerald-50','text-emerald-600','font-bold');} }
         function renderSidebar(cid) { const l=document.getElementById('sidebar-list'); l.innerHTML=''; document.querySelectorAll(`#${cid} [id$="-wrapper"]`).forEach(w=>{ addToSidebar(w.id.replace('-wrapper',''), w.querySelector('input').value); }); }
         
-        // --- 交互组件与弹窗 ---
-        function showDropdown(e,t,el){e.stopPropagation();const d=document.getElementById('dropdown-container');d.innerHTML='';(dataDict[t]||[]).forEach(x=>{const v=document.createElement('div');v.className='px-3 py-2 text-[13px] cursor-pointer text-slate-600 rounded-md hover:bg-emerald-50 hover:text-emerald-600 transition-colors font-medium';v.innerText=x;v.onclick=(ev)=>{ev.stopPropagation();el.innerHTML=`${x} <span class="text-[10px] opacity-60 ml-0.5 pointer-events-none">∨</span>`;d.style.display='none';};d.appendChild(v);});const r=el.getBoundingClientRect();d.style.left=r.left+'px';d.style.top=(r.bottom+scrollY+5)+'px';d.style.display='block';}
+        // --- 交互组件 ---
+        function showDropdown(e,t,el){e.stopPropagation();const d=document.getElementById('dropdown-container');d.innerHTML='';(dataDict[t]||[]).forEach(x=>{const v=document.createElement('div');v.className='px-3 py-2 text-[13px] cursor-pointer text-slate-600 rounded-md hover:bg-emerald-50 hover:text-emerald-600 transition-colors font-medium';v.innerText=x;v.onclick=(ev)=>{ev.stopPropagation();el.innerHTML=`${x} <span class="text-[10px] opacity-60 ml-0.5 pointer-events-none">∨</span>`;d.style.display='none'; const blockId = el.closest('.editor-container')?.id; if(blockId) checkPromptEmpty(blockId); };d.appendChild(v);});const r=el.getBoundingClientRect();d.style.left=r.left+'px';d.style.top=(r.bottom+scrollY+5)+'px';d.style.display='block';}
         function handleGlobalClick(){document.getElementById('dropdown-container').style.display='none';}
         
-        // --- NEW: 折叠设定面板与标签选中逻辑 ---
+        // --- 折叠设定面板与标签选中逻辑 ---
         let isDramaSettingsExpanded = true;
         function toggleDramaSettings() {
             isDramaSettingsExpanded = !isDramaSettingsExpanded;
@@ -871,7 +1010,6 @@
             lucide.createIcons();
         }
 
-        // 标签选中监听
         document.addEventListener('click', (e) => {
             if (e.target.classList.contains('drama-tag')) {
                 const siblings = e.target.parentElement.querySelectorAll('.drama-tag');
@@ -908,7 +1046,6 @@
                 const lastBlock = container.lastElementChild;
                 if(lastBlock) {
                     lastBlock.querySelector('.prompt-input').innerHTML = tpl;
-                    // 更新 initialPrompts 以保证长剧本的内容也能一键恢复
                     const blockId = lastBlock.id.replace('-wrapper', '');
                     window.initialPrompts[blockId] = tpl;
                 }
